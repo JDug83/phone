@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="StandBy">
+    <meta name="theme-color" content="#000000">
+    <title>StandBy</title>
+
+    <link rel="preconnect" href="https://fonts.cdnfonts.com" crossorigin>
+    <link href="https://fonts.cdnfonts.com/css/sf-pro-display" rel="stylesheet">
+
+    <style>
+        @import url('https://fonts.cdnfonts.com/css/sf-pro-display');
+
+        /* ==========================================================================
+           PURE OLED iOS STANDBY DIGITAL CLOCK (SF PRO DISPLAY)
+           - Pure #000000 OLED black with massive edge-to-edge SF Pro numerals
+           - Tap anywhere: wakes if dimmed, or switches Night Red <-> Cool Blue
+           - Double-tap: toggles fullscreen & locks screen awake
+           ========================================================================== */
+        :root {
+            /* iPhone StandBy Night Red (#FF2D20) */
+            --color-red: #FF2D20;
+            --glow-red-inner: rgba(255, 45, 32, 0.36);
+            --glow-red-outer: rgba(255, 45, 32, 0.14);
+
+            /* iPhone StandBy Cool Blue (#0A84FF) */
+            --color-blue: #0A84FF;
+            --glow-blue-inner: rgba(10, 132, 255, 0.38);
+            --glow-blue-outer: rgba(10, 132, 255, 0.16);
+
+            --active-color: var(--color-red);
+            --active-glow-inner: var(--glow-red-inner);
+            --active-glow-outer: var(--glow-red-outer);
+        }
+
+        [data-mode="blue"] {
+            --active-color: var(--color-blue);
+            --active-glow-inner: var(--glow-blue-inner);
+            --active-glow-outer: var(--glow-blue-outer);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+            overflow: hidden;
+            touch-action: manipulation;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .standby-viewport {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100dvh;
+            background-color: #000000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        /* Transform wrapper for exact edge-to-edge auto-scaling & OLED burn-in shift */
+        .clock-scaler {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-origin: center center;
+            transition:
+                transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 1.1s cubic-bezier(0.22, 1, 0.36, 1);
+            will-change: transform, opacity;
+            opacity: 1;
+        }
+
+        /* Nighttime sleep dim state (low bedside luminance) */
+        .standby-viewport.is-dimmed .clock-scaler {
+            opacity: 0.18;
+        }
+
+        /* Unscaled 200px SF Pro reference clock measured by JS to fill 96% screen width */
+        .clock-digits {
+            display: inline-flex;
+            align-items: baseline;
+            justify-content: center;
+            white-space: nowrap;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro', sans-serif;
+            font-weight: 900;
+            font-size: 200px;
+            line-height: 0.78;
+            letter-spacing: -0.045em;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum" 1;
+            transform: scaleY(1.08);
+            color: var(--active-color);
+            text-shadow:
+                0 0 20px var(--active-glow-inner),
+                0 0 54px var(--active-glow-outer);
+            transition:
+                color 0.35s ease,
+                text-shadow 0.35s ease;
+            padding: 0;
+        }
+
+        /* Colon positioning & gentle 1Hz StandBy blink */
+        .colon {
+            display: inline-block;
+            margin: 0 -0.02em;
+            transform: translateY(-0.07em);
+            transition: opacity 0.25s ease;
+        }
+
+        .colon.dim-pulse {
+            opacity: 0.35;
+        }
+
+        /* One-time subtle prompt on initial load; disappears permanently on first tap */
+        .wake-prompt {
+            position: fixed;
+            bottom: max(18px, env(safe-area-inset-bottom, 18px));
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: rgba(255, 59, 48, 0.72);
+            background: rgba(255, 45, 32, 0.08);
+            border: 1px solid rgba(255, 45, 32, 0.22);
+            padding: 7px 16px;
+            border-radius: 999px;
+            white-space: nowrap;
+            pointer-events: none;
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            z-index: 10;
+        }
+
+        .wake-prompt.is-hidden {
+            opacity: 0;
+            transform: translateX(-50%) translateY(8px);
+        }
+
+        /* Hidden 1x1px NoSleep video element for iOS Safari / standalone keep-awake */
+        .nosleep-media {
+            position: fixed;
+            top: -10px;
+            left: -10px;
+            width: 1px;
+            height: 1px;
+            opacity: 0.001;
+            pointer-events: none;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body data-mode="red">
+
+    <main id="viewport" class="standby-viewport" aria-label="StandBy UK Clock">
+        <div id="scaler" class="clock-scaler">
+            <div id="clock" class="clock-digits">
+                <span id="hh">--</span><span id="colon" class="colon">:</span><span id="mm">--</span>
+            </div>
+        </div>
+        <div id="wake-prompt" class="wake-prompt">TAP ONCE TO LOCK SCREEN AWAKE</div>
+    </main>
+
+    <!-- Hidden video & canvas used to force iOS/Android to keep screen awake -->
+    <video id="nosleep-video" class="nosleep-media" playsinline webkit-playsinline muted loop></video>
+    <canvas id="nosleep-canvas" class="nosleep-media" width="2" height="2"></canvas>
+
+    <script>
+        (function () {
+            // Dynamically inject standalone Web App Manifest so "Add to Home Screen" opens fullscreen landscape
+            const manifestData = {
+                name: "UK StandBy Clock",
+                short_name: "StandBy",
+                start_url: ".",
+                display: "standalone",
+                orientation: "landscape",
+                background_color: "#000000",
+                theme_color: "#000000"
+            };
+            const manifestLink = document.createElement('link');
+            manifestLink.rel = 'manifest';
+            manifestLink.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifestData));
+            document.head.appendChild(manifestLink);
+
+            const viewport = document.getElementById('viewport');
+            const scalerEl = document.getElementById('scaler');
+            const clockEl = document.getElementById('clock');
+            const hhEl = document.getElementById('hh');
+            const mmEl = document.getElementById('mm');
+            const colonEl = document.getElementById('colon');
+            const wakePromptEl = document.getElementById('wake-prompt');
+            const noSleepVideo = document.getElementById('nosleep-video');
+            const noSleepCanvas = document.getElementById('nosleep-canvas');
+
+            // Start in iOS StandBy Night Red (#FF2D20)
+            let currentColor = 'red';
+            let isDimmed = false;
+            let dimTimer = null;
+            let wakeLock = null;
+            let hasActivatedKeepAwake = false;
+            let noSleepStreamInitialized = false;
+
+            // Minimal valid MP4 base64 fallback for browsers that prefer src over captureStream
+            const TINY_MP4_BASE64 =
+                'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAu1tZGF0AAACrgYF//+q3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE0MiByMjQ5NSBlNmI0YzI0IC0gSC4yNjQvTVBFRy00 AVCIGNvZGVjIC0gQ29weXJpZ2h0IDIwMDMtMjAxNCAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3VibWU9NyBwcyk9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfHlyaW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTI1IHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCB2YnZfbWF4cmF0ZT0wIHZidl9idWZzaXplPTAgY3JmX21heD0wLjAgbmFsX2hyZD1ub25lIGZpbGxlcj0wIGlwX3JhdGlvPTEuNDAgYXE9MToxLjAw ';
+
+            // OLED burn-in pixel shift offsets (-2px to +2px)
+            let shiftX = 0;
+            let shiftY = 0;
+            let currentScaleX = 1;
+            let currentScaleY = 1;
+
+            const DIM_TIMEOUT_MS = 12000;
+
+            document.body.setAttribute('data-mode', currentColor);
+
+            /**
+             * ========================================================================
+             * 1. LIVE UK TIME ENGINE (Europe/London)
+             * Automatically handles GMT (November) and BST transitions accurately
+             * in 12-hour iOS StandBy format (no leading zero on hours, no AM/PM).
+             * ========================================================================
+             */
+            const ukFormatter = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Europe/London',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            });
+
+            let lastTimeStr = '';
+
+            function updateUKTime() {
+                const parts = ukFormatter.formatToParts(new Date());
+                let h = '12';
+                let m = '00';
+                let s = 0;
+
+                for (const part of parts) {
+                    if (part.type === 'hour') {
+                        const hour12 = parseInt(part.value, 10) % 12 || 12;
+                        h = String(hour12);
+                    }
+                    if (part.type === 'minute') m = part.value.padStart(2, '0');
+                    if (part.type === 'second') s = parseInt(part.value, 10);
+                }
+
+                const timeStr = h + ':' + m;
+                if (timeStr !== lastTimeStr) {
+                    hhEl.textContent = h;
+                    mmEl.textContent = m;
+                    lastTimeStr = timeStr;
+                    fitClockToScreen();
+                }
+
+                // Smooth 1Hz colon blink
+                if (s % 2 === 1) {
+                    colonEl.classList.add('dim-pulse');
+                } else {
+                    colonEl.classList.remove('dim-pulse');
+                }
+            }
+
+            /**
+             * ========================================================================
+             * 2. MASSIVE FULL-BLEED AUTO-FIT SCALER
+             * Dynamically scales HH:MM so it fills 96% of the viewport width and up to
+             * 90% of the viewport height in landscape (and 96% width in portrait).
+             * ========================================================================
+             */
+            function applyTransform() {
+                const sx = currentScaleX.toFixed(4);
+                const sy = currentScaleY.toFixed(4);
+                scalerEl.style.transform = `translate3d(${shiftX}px, ${shiftY}px, 0) scale(${sx}, ${sy})`;
+            }
+
+            function fitClockToScreen() {
+                const naturalW = clockEl.offsetWidth;
+                const naturalH = clockEl.offsetHeight;
+                if (!naturalW || !naturalH) return;
+
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const isLandscape = vw >= vh;
+
+                if (isLandscape) {
+                    const targetW = vw * 0.96;
+                    const targetH = vh * 0.90;
+                    const scaleW = targetW / naturalW;
+                    const scaleH = targetH / naturalH;
+
+                    currentScaleX = scaleW;
+                    currentScaleY = Math.min(scaleH, scaleW * 1.35);
+                } else {
+                    const targetW = vw * 0.96;
+                    const targetH = vh * 0.55;
+                    const scaleW = targetW / naturalW;
+                    const scaleH = targetH / naturalH;
+
+                    currentScaleX = scaleW;
+                    currentScaleY = Math.min(scaleH, scaleW * 1.22);
+                }
+
+                applyTransform();
+            }
+
+            window.addEventListener('resize', fitClockToScreen);
+            window.addEventListener('orientationchange', () => {
+                setTimeout(fitClockToScreen, 60);
+                setTimeout(fitClockToScreen, 250);
+            });
+
+            if (document.fonts && document.fonts.ready) {
+                document.fonts.ready.then(fitClockToScreen);
+            }
+
+            /**
+             * ========================================================================
+             * 3. TOUCH & CLICK INTERACTIONS
+             * - Single Tap: Wake if dimmed, otherwise toggle Night Red <-> Cool Blue
+             * - Double Tap: Toggle fullscreen & request Screen Wake Lock
+             * ========================================================================
+             */
+            function resetDimTimer() {
+                clearTimeout(dimTimer);
+                dimTimer = setTimeout(() => {
+                    isDimmed = true;
+                    viewport.classList.add('is-dimmed');
+                }, DIM_TIMEOUT_MS);
+            }
+
+            function wakeScreen() {
+                isDimmed = false;
+                viewport.classList.remove('is-dimmed');
+                resetDimTimer();
+            }
+
+            function toggleRedBlue() {
+                currentColor = currentColor === 'red' ? 'blue' : 'red';
+                document.body.setAttribute('data-mode', currentColor);
+            }
+
+            /**
+             * ========================================================================
+             * BULLETPROOF DUAL KEEP-AWAKE ENGINE
+             * 1) Standard Screen Wake Lock API (navigator.wakeLock.request('screen'))
+             * 2) iOS/Android NoSleep fallback: 1fps live canvas stream + looping muted
+             *    inline video so mobile browsers never sleep the display after 1st tap.
+             * ========================================================================
+             */
+            function startNoSleepVideo() {
+                try {
+                    if (!noSleepStreamInitialized) {
+                        const ctx = noSleepCanvas.getContext('2d');
+                        let toggle = false;
+                        // Repaint 1x1 pixel once per second so the media stream stays active
+                        setInterval(() => {
+                            if (ctx) {
+                                ctx.fillStyle = toggle ? '#000000' : '#010000';
+                                ctx.fillRect(0, 0, 2, 2);
+                                toggle = !toggle;
+                            }
+                        }, 1000);
+
+                        const stream = noSleepCanvas.captureStream
+                            ? noSleepCanvas.captureStream(1)
+                            : (noSleepCanvas.mozCaptureStream ? noSleepCanvas.mozCaptureStream(1) : null);
+
+                        if (stream) {
+                            noSleepVideo.srcObject = stream;
+                        } else {
+                            noSleepVideo.src = TINY_MP4_BASE64;
+                        }
+                        noSleepStreamInitialized = true;
+                    }
+
+                    const playPromise = noSleepVideo.play();
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                        playPromise.catch(() => {
+                            // Fallback to base64 source if stream playback was rejected
+                            if (!noSleepVideo.src) {
+                                noSleepVideo.srcObject = null;
+                                noSleepVideo.src = TINY_MP4_BASE64;
+                                noSleepVideo.play().catch(() => {});
+                            }
+                        });
+                    }
+                } catch (_) {}
+            }
+
+            async function ensureWakeLock() {
+                startNoSleepVideo();
+
+                if (!('wakeLock' in navigator) || wakeLock) return;
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        wakeLock = null;
+                    });
+                } catch (_) {}
+            }
+
+            async function toggleFullscreen() {
+                await ensureWakeLock();
+                try {
+                    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                        if (document.documentElement.requestFullscreen) {
+                            await document.documentElement.requestFullscreen();
+                        } else if (document.documentElement.webkitRequestFullscreen) {
+                            await document.documentElement.webkitRequestFullscreen();
+                        }
+                    } else {
+                        if (document.exitFullscreen) {
+                            await document.exitFullscreen();
+                        } else if (document.webkitExitFullscreen) {
+                            await document.webkitExitFullscreen();
+                        }
+                    }
+                } catch (_) {}
+                setTimeout(fitClockToScreen, 100);
+            }
+
+            let lastTapTime = 0;
+
+            viewport.addEventListener('pointerup', () => {
+                ensureWakeLock();
+
+                // First tap locks the screen awake & permanently hides the tiny prompt pill
+                if (!hasActivatedKeepAwake) {
+                    hasActivatedKeepAwake = true;
+                    if (wakePromptEl) {
+                        wakePromptEl.classList.add('is-hidden');
+                        setTimeout(() => wakePromptEl.remove(), 400);
+                    }
+                    wakeScreen();
+                    return;
+                }
+
+                const now = Date.now();
+                const isDoubleTap = (now - lastTapTime) < 280;
+                lastTapTime = now;
+
+                if (isDoubleTap) {
+                    wakeScreen();
+                    toggleFullscreen();
+                    return;
+                }
+
+                if (isDimmed) {
+                    wakeScreen();
+                } else {
+                    toggleRedBlue();
+                    resetDimTimer();
+                }
+            });
+
+            // Re-lock wake state whenever the phone browser returns to foreground
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    if (hasActivatedKeepAwake) ensureWakeLock();
+                    fitClockToScreen();
+                }
+            });
+
+            window.addEventListener('focus', () => {
+                if (hasActivatedKeepAwake) ensureWakeLock();
+            });
+
+            // Periodic heartbeat every 15s to verify WakeLock and NoSleep video are still active
+            setInterval(() => {
+                if (hasActivatedKeepAwake) {
+                    ensureWakeLock();
+                }
+            }, 15000);
+
+            /**
+             * ========================================================================
+             * 4. SUBTLE OLED BURN-IN PIXEL SHIFT (Every 60 seconds)
+             * ========================================================================
+             */
+            function burnInShift() {
+                shiftX = Math.floor(Math.random() * 5) - 2;
+                shiftY = Math.floor(Math.random() * 5) - 2;
+                applyTransform();
+            }
+
+            // Initialize immediately
+            updateUKTime();
+            fitClockToScreen();
+            resetDimTimer();
+
+            setInterval(updateUKTime, 250);
+            setInterval(burnInShift, 60000);
+        })();
+    </script>
+</body>
+</html>
